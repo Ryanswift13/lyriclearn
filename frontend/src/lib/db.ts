@@ -1,4 +1,5 @@
 import Dexie, { type Table } from 'dexie'
+import type { WordExplanation } from '../services/deepseek'
 
 export interface VocabEntry {
   id?: number
@@ -7,12 +8,7 @@ export interface VocabEntry {
   songName: string
   artist: string
   songId: string
-  explanation: {
-    definition: string
-    example: string
-    culture: string
-    memory_tip: string
-  }
+  explanation: WordExplanation
   savedAt: Date
   reviewCount: number
 }
@@ -22,9 +18,7 @@ class AppDB extends Dexie {
 
   constructor() {
     super('musicEnglishApp')
-    this.version(1).stores({
-      vocab: '++id, word, songId, savedAt',
-    })
+    this.version(2).stores({ vocab: '++id, word, songId, savedAt' })
   }
 }
 

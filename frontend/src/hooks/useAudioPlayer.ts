@@ -9,17 +9,11 @@ export function useAudioPlayer() {
   useEffect(() => {
     const audio = new Audio()
     audioRef.current = audio
-
-    const onTimeUpdate = () => setCurrentTime(audio.currentTime)
     const onDurationChange = () => setDuration(isNaN(audio.duration) ? 0 : audio.duration)
     const onEnded = () => setIsPlaying(false)
-
-    audio.addEventListener('timeupdate', onTimeUpdate)
     audio.addEventListener('durationchange', onDurationChange)
     audio.addEventListener('ended', onEnded)
-
     return () => {
-      audio.removeEventListener('timeupdate', onTimeUpdate)
       audio.removeEventListener('durationchange', onDurationChange)
       audio.removeEventListener('ended', onEnded)
       audio.pause()
@@ -43,6 +37,18 @@ export function useAudioPlayer() {
     if (!audioRef.current) return
     audioRef.current.playbackRate = playbackRate
   }, [playbackRate])
+
+  // RAF loop for smooth currentTime (karaoke needs ~60fps)
+  useEffect(() => {
+    if (!isPlaying) return
+    let rafId: number
+    const tick = () => {
+      if (audioRef.current) setCurrentTime(audioRef.current.currentTime)
+      rafId = requestAnimationFrame(tick)
+    }
+    rafId = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(rafId)
+  }, [isPlaying])
 
   const seek = useCallback((time: number) => {
     if (!audioRef.current) return

@@ -8,6 +8,8 @@ export interface SongInfo {
   album: string
   coverUrl: string
   duration: number
+  color: string
+  color2: string
 }
 
 interface PlayerState {

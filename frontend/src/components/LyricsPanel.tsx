@@ -1,26 +1,15 @@
-import { useEffect, useRef, useMemo } from 'react'
+import { useMemo } from 'react'
 import { usePlayerStore } from '../store/playerStore'
 import { LyricLine } from './LyricLine'
 
-function ShimmerDivider() {
-  return (
-    <div className="relative mx-8 my-1 overflow-hidden" style={{ height: 1 }}>
-      <div
-        className="shimmer-line absolute inset-0"
-        style={{ background: 'linear-gradient(90deg, transparent, rgba(124,58,237,0.6), transparent)' }}
-      />
-    </div>
-  )
+interface Props {
+  karaoke: boolean
+  showTranslation: boolean
+  onWord: (word: string, sentence: string) => void
 }
 
-export function LyricsPanel() {
-  const { lyrics, translationLyrics, currentLineIndex } = usePlayerStore()
-  const lineRefs = useRef<(HTMLDivElement | null)[]>([])
-
-  useEffect(() => {
-    if (currentLineIndex < 0) return
-    lineRefs.current[currentLineIndex]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  }, [currentLineIndex])
+export function LyricsPanel({ karaoke, showTranslation, onWord }: Props) {
+  const { lyrics, translationLyrics, currentLineIndex, currentTime } = usePlayerStore()
 
   const translationMap = useMemo(() => {
     if (!translationLyrics.length) return [] as string[]
@@ -37,39 +26,31 @@ export function LyricsPanel() {
   if (!lyrics.length) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center gap-3">
-        <div style={{ fontSize: 48, opacity: 0.2 }}>🎵</div>
-        <p className="text-sm" style={{ color: 'rgba(255,255,255,0.25)' }}>
-          搜索并选择一首歌开始学习
-        </p>
+        <div style={{ fontSize: 48, opacity: 0.15, fontFamily: 'var(--font-display)' }}>♪</div>
+        <p style={{ color: 'var(--ink-3)', fontSize: 14 }}>搜索并选择一首歌开始学习</p>
       </div>
     )
   }
 
   return (
-    <div
-      className="flex-1 overflow-y-auto py-8"
-      style={{ scrollBehavior: 'smooth' }}
-    >
-      <div style={{ height: '30vh' }} />
-
-      {lyrics.map((line, i) => {
-        const isCurrent = i === currentLineIndex
-        const translation = translationMap[i]
-
-        return (
-          <div key={i} ref={(el) => { lineRefs.current[i] = el }}>
-            {isCurrent && <ShimmerDivider />}
-            <LyricLine
-              text={line.text}
-              isCurrent={isCurrent}
-              translation={isCurrent ? translation : undefined}
-            />
-            {isCurrent && <ShimmerDivider />}
-          </div>
-        )
-      })}
-
-      <div style={{ height: '30vh' }} />
+    <div className="lyrics-scroll">
+      <div className="lyrics-spacer" />
+      {lyrics.map((line, i) => (
+        <LyricLine
+          key={i}
+          text={line.text}
+          lineIdx={i}
+          currentIdx={currentLineIndex}
+          currentTime={currentTime}
+          lineTime={line.time}
+          nextLineTime={i < lyrics.length - 1 ? lyrics[i + 1].time : line.time + 5}
+          translation={translationMap[i]}
+          karaoke={karaoke}
+          showTranslation={showTranslation}
+          onWord={onWord}
+        />
+      ))}
+      <div className="lyrics-spacer" />
     </div>
   )
 }
