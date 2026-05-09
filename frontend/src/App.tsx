@@ -4,21 +4,30 @@ import { LyricsPanel } from './components/LyricsPanel'
 import { VocabCard } from './components/VocabCard'
 import { LibraryScreen } from './components/LibraryScreen'
 import { ProfileScreen } from './components/ProfileScreen'
+import { LoginModal } from './components/LoginModal'
 import { useAudioPlayer } from './hooks/useAudioPlayer'
 import { useLyricsSync } from './hooks/useLyricsSync'
 import { useVocabInit } from './hooks/useVocabNotebook'
+import { useLibraryInit } from './hooks/useLibrary'
 import { usePlayerStore } from './store/playerStore'
 import { useSettingsStore, type Theme } from './store/settingsStore'
 import { useNotebookStore } from './store/notebookStore'
-import { formatDuration } from './services/netease'
+import { formatDuration, logout } from './services/netease'
 
 type View = 'player' | 'library' | 'profile'
 
 const SPEED_OPTIONS = [0.6, 0.75, 1.0, 1.25] as const
 
 // ── Settings Modal ──────────────────────────────────────────
+const QUALITY_OPTIONS: { value: import('./store/settingsStore').AudioQuality; label: string }[] = [
+  { value: 'standard', label: '标准 128k' },
+  { value: 'higher',   label: '较高 192k' },
+  { value: 'exhigh',   label: '极高 320k' },
+  { value: 'lossless', label: '无损 FLAC' },
+]
+
 function SettingsModal({ onClose }: { onClose: () => void }) {
-  const { theme, karaoke, showTranslation, deepseekApiKey, setTheme, setKaraoke, setShowTranslation, setDeepseekApiKey } = useSettingsStore()
+  const { theme, karaoke, showTranslation, deepseekApiKey, audioQuality, setTheme, setKaraoke, setShowTranslation, setDeepseekApiKey, setAudioQuality } = useSettingsStore()
   const [key, setKey] = useState(deepseekApiKey)
 
   return (
@@ -46,6 +55,17 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
           <div className="modal-row">
             <span className="modal-row-label">显示中文翻译</span>
             <button className={`toggle ${showTranslation ? 'on' : ''}`} onClick={() => setShowTranslation(!showTranslation)} />
+          </div>
+        </div>
+
+        <div className="modal-section">
+          <div className="modal-label">音频质量</div>
+          <div className="theme-chips">
+            {QUALITY_OPTIONS.map((q) => (
+              <button key={q.value} className={`chip ${audioQuality === q.value ? 'on' : ''}`} onClick={() => setAudioQuality(q.value)}>
+                {q.label}
+              </button>
+            ))}
           </div>
         </div>
 
@@ -102,7 +122,7 @@ function PlayerLeft({ seek }: { seek: (t: number) => void }) {
         isPlaying={isPlaying}
         color={song?.color ?? '#5b8fa8'}
         color2={song?.color2 ?? '#3d6e85'}
-        size={300}
+        size={380}
       />
 
       <div className="now-meta">
@@ -184,19 +204,27 @@ function PlayerLeft({ seek }: { seek: (t: number) => void }) {
 export default function App() {
   const [view, setView] = useState<View>(() => (localStorage.getItem('verse:view') as View) ?? 'player')
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [loginOpen, setLoginOpen] = useState(false)
   const [openWord, setOpenWord] = useState<{ word: string; sentence: string } | null>(null)
-  const { theme, karaoke, showTranslation } = useSettingsStore()
+  const { theme, karaoke, showTranslation, neteaseCookie, neteaseNickname, neteaseAvatarUrl, clearNeteaseLogin } = useSettingsStore()
   const { song } = usePlayerStore()
 
   const { seek } = useAudioPlayer()
   useLyricsSync()
   useVocabInit()
+  useLibraryInit()
 
   // Apply theme to <html>
   useEffect(() => { document.documentElement.dataset.style = theme }, [theme])
   useEffect(() => { localStorage.setItem('verse:view', view) }, [view])
 
+
   const handleWord = (word: string, sentence: string) => setOpenWord({ word, sentence })
+
+  const handleLogout = async () => {
+    if (neteaseCookie) await logout(neteaseCookie).catch(() => {})
+    clearNeteaseLogin()
+  }
 
   return (
     <div className="app">
@@ -229,13 +257,25 @@ export default function App() {
           <div className="streak-pill">
             🔥 <span className="streak-pill-num">{useNotebookStore((s) => s.entries.length)}</span>
           </div>
+          {neteaseNickname ? (
+            <button className="user-pill" onClick={handleLogout} title="点击退出登录">
+              <div className="user-avatar">
+                {neteaseAvatarUrl
+                  ? <img src={neteaseAvatarUrl} alt="" />
+                  : neteaseNickname[0]}
+              </div>
+              {neteaseNickname}
+            </button>
+          ) : (
+            <button className="login-btn" onClick={() => setLoginOpen(true)}>登录网易云</button>
+          )}
           <button className="settings-btn" onClick={() => setSettingsOpen(true)} aria-label="设置">⚙</button>
         </div>
       </header>
 
-      {/* Main content */}
+      {/* Main content — always mounted, hidden via CSS to preserve state */}
       <main className="main">
-        {view === 'player' && (
+        <div className={`view-slot ${view === 'player' ? 'view-slot--on' : ''}`}>
           <div className="player">
             <PlayerLeft seek={seek} />
             <div className="player-right">
@@ -243,18 +283,25 @@ export default function App() {
                 <span className="lyrics-eyebrow">Lyrics</span>
                 <span className="lyrics-hint">点击单词获取 AI 解释</span>
               </div>
-              <LyricsPanel karaoke={karaoke} showTranslation={showTranslation} onWord={handleWord} />
+              <LyricsPanel karaoke={karaoke} showTranslation={showTranslation} onWord={handleWord} onSeek={seek} />
             </div>
           </div>
-        )}
-        {view === 'library' && <LibraryScreen onSongPick={() => setView('player')} />}
-        {view === 'profile' && <ProfileScreen />}
+        </div>
+        <div className={`view-slot ${view === 'library' ? 'view-slot--on' : ''}`}>
+          <LibraryScreen onSongPick={() => setView('player')} />
+        </div>
+        <div className={`view-slot ${view === 'profile' ? 'view-slot--on' : ''}`}>
+          <ProfileScreen />
+        </div>
       </main>
 
       {/* Vocab card */}
       {openWord && (
         <VocabCard word={openWord.word} sentence={openWord.sentence} onClose={() => setOpenWord(null)} />
       )}
+
+      {/* Login modal */}
+      {loginOpen && <LoginModal onClose={() => setLoginOpen(false)} />}
 
       {/* Settings modal */}
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}

@@ -11,6 +11,7 @@ interface Props {
   karaoke: boolean
   showTranslation: boolean
   onWord: (word: string, sentence: string) => void
+  onSeek: (time: number) => void
 }
 
 interface Token { type: 'word' | 'sep'; text: string }
@@ -29,7 +30,7 @@ function tokenize(line: string): Token[] {
 export function LyricLine({
   text, lineIdx, currentIdx, currentTime,
   lineTime, nextLineTime, translation,
-  karaoke, showTranslation, onWord,
+  karaoke, showTranslation, onWord, onSeek,
 }: Props) {
   const isCurrent = lineIdx === currentIdx
   const isPast = lineIdx < currentIdx
@@ -59,15 +60,16 @@ export function LyricLine({
   const wordCount = tokens.filter((t) => t.type === 'word').length
   let wIndex = 0
 
-  // Soft-focus blur + fade for non-current lines
-  const blur = isCurrent ? 0 : Math.min(4, 0.5 + (dist - 1) * 0.9)
-  const opacity = isCurrent ? 1 : Math.max(0.18, 1 - dist * 0.2)
+  // Blur is 0 for current + 2 adjacent lines, then ramps up
+  const blur = isCurrent ? 0 : Math.max(0, Math.min(4, (dist - 2) * 1.6))
+  const opacity = isCurrent ? 1 : Math.max(0.18, 1 - dist * 0.12)
 
   return (
     <div
       ref={ref}
       className={`lyric-line ${isCurrent ? 'current' : ''} ${isPast ? 'past' : ''}`}
-      style={{ filter: `blur(${blur}px)`, opacity }}
+      style={{ filter: `blur(${blur}px)`, opacity, cursor: 'pointer' }}
+      onClick={() => onSeek(lineTime)}
     >
       <div className="lyric-en">
         {tokens.map((tok, i) => {
@@ -79,7 +81,7 @@ export function LyricLine({
               key={i}
               className="word"
               style={{ '--lit': lit } as React.CSSProperties}
-              onClick={() => onWord(tok.text, text)}
+              onClick={(e) => { e.stopPropagation(); onWord(tok.text, text) }}
             >
               {tok.text}
             </span>

@@ -6,9 +6,10 @@ interface Props {
   karaoke: boolean
   showTranslation: boolean
   onWord: (word: string, sentence: string) => void
+  onSeek: (time: number) => void
 }
 
-export function LyricsPanel({ karaoke, showTranslation, onWord }: Props) {
+export function LyricsPanel({ karaoke, showTranslation, onWord, onSeek }: Props) {
   const { lyrics, translationLyrics, currentLineIndex, currentTime } = usePlayerStore()
 
   const translationMap = useMemo(() => {
@@ -48,6 +49,7 @@ export function LyricsPanel({ karaoke, showTranslation, onWord }: Props) {
           karaoke={karaoke}
           showTranslation={showTranslation}
           onWord={onWord}
+          onSeek={onSeek}
         />
       ))}
       <div className="lyrics-spacer" />
