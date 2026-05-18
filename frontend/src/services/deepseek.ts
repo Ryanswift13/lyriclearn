@@ -11,16 +11,7 @@ export interface WordExplanation {
 
 const cache = new Map<string, WordExplanation>()
 
-export async function explainWord(
-  word: string,
-  sentence: string,
-  songName: string,
-  artist: string,
-  apiKey: string,
-): Promise<WordExplanation> {
-  const cacheKey = `${word.toLowerCase()}::${songName}`
-  if (cache.has(cacheKey)) return cache.get(cacheKey)!
-
+function buildBody(word: string, sentence: string, songName: string, artist: string) {
   const prompt = `你是英语老师，帮用户通过音乐学英语。
 歌曲：《${songName}》- ${artist}
 歌词原句：${sentence}
@@ -37,25 +28,53 @@ export async function explainWord(
   "example_cn": "歌词原句的中文翻译",
   "memory_tip": "一句话记忆技巧（中文）"
 }`
-
-  const res = await fetch('https://api.deepseek.com/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model: 'deepseek-chat',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.3,
-      response_format: { type: 'json_object' },
-    }),
+  return JSON.stringify({
+    model: 'deepseek-chat',
+    messages: [{ role: 'user', content: prompt }],
+    temperature: 0.3,
+    response_format: { type: 'json_object' },
   })
+}
 
+async function parseExplanation(res: Response): Promise<WordExplanation> {
   if (!res.ok) throw new Error(`DeepSeek ${res.status}: ${await res.text()}`)
-
   const data = await res.json()
   const content = data.choices?.[0]?.message?.content
   if (!content) throw new Error('DeepSeek 返回空内容')
+  return JSON.parse(content) as WordExplanation
+}
 
-  const explanation = JSON.parse(content) as WordExplanation
+export async function explainWord(
+  word: string,
+  sentence: string,
+  songName: string,
+  artist: string,
+  apiKey: string,
+): Promise<WordExplanation> {
+  const cacheKey = `${word.toLowerCase()}::${songName}`
+  if (cache.has(cacheKey)) return cache.get(cacheKey)!
+
+  const body = buildBody(word, sentence, songName, artist)
+  let explanation: WordExplanation
+
+  if (apiKey) {
+    // User provided their own key — call DeepSeek directly
+    const res = await fetch('https://api.deepseek.com/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body,
+    })
+    explanation = await parseExplanation(res)
+  } else {
+    // Fallback: use backend proxy (Vite middleware / future server route)
+    const res = await fetch('/ai/explain', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    })
+    explanation = await parseExplanation(res)
+  }
+
   cache.set(cacheKey, explanation)
   return explanation
 }

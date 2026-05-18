@@ -186,6 +186,30 @@ export async function getRecommendations(): Promise<SearchResult[]> {
   return english.slice(0, 12).map(rawToResult)
 }
 
+// Apple Music-style autoplay: songs similar to a seed track.
+// Each track has its own 相似歌曲 list, so the supply keeps changing as the queue advances.
+export async function getSimilarSongs(id: string): Promise<SearchResult[]> {
+  try {
+    const res = await api.get('/simi/song', { params: { id, ...cp() } })
+    const songs: any[] = res.data?.songs ?? []
+    return songs
+      .filter((s) => isEnglishSong(s.name, s.artists?.map((a: any) => a.name).join(' ') ?? ''))
+      .map(rawToResult)
+  } catch {
+    return []
+  }
+}
+
+// ── Search suggestions ───────────────────────────────────────
+export async function getSearchSuggestions(keyword: string): Promise<string[]> {
+  if (!keyword.trim()) return []
+  try {
+    const res = await api.get('/search/suggest', { params: { keywords: keyword, type: 'mobile' } })
+    const matches: any[] = res.data?.result?.allMatch ?? []
+    return matches.map((m) => m.keyword ?? '').filter(Boolean).slice(0, 8)
+  } catch { return [] }
+}
+
 // ── Album search ──────────────────────────────────────────────
 export interface AlbumResult {
   id: string

@@ -7,6 +7,7 @@ import { usePlayerStore } from '../store/playerStore'
 interface Props {
   word: string
   sentence: string
+  lineTime: number
   onClose: () => void
 }
 
@@ -32,7 +33,7 @@ function Confetti({ x, y, color }: { x: number; y: number; color: string }) {
   )
 }
 
-export function VocabCard({ word, sentence, onClose }: Props) {
+export function VocabCard({ word, sentence, lineTime, onClose }: Props) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [explanation, setExplanation] = useState<Awaited<ReturnType<typeof explainWord>> | null>(null)
@@ -54,7 +55,7 @@ export function VocabCard({ word, sentence, onClose }: Props) {
 
   const handleSave = async (e: React.MouseEvent) => {
     if (!explanation || !song || saved) return
-    await saveWord({ word, sentence, songName: song.name, artist: song.artist, songId: song.id, explanation })
+    await saveWord({ word, sentence, songName: song.name, artist: song.artist, songId: song.id, explanation, lineTime, coverUrl: song.coverUrl, color: song.color, color2: song.color2 })
     setSaved(true)
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
     setConfetti({ x: r.left + r.width / 2, y: r.top + r.height / 2 })

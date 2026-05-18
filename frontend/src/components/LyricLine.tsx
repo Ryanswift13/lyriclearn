@@ -10,7 +10,8 @@ interface Props {
   translation?: string
   karaoke: boolean
   showTranslation: boolean
-  onWord: (word: string, sentence: string) => void
+  frozen?: boolean
+  onWord: (word: string, sentence: string, lineTime: number) => void
   onSeek: (time: number) => void
 }
 
@@ -30,21 +31,21 @@ function tokenize(line: string): Token[] {
 export function LyricLine({
   text, lineIdx, currentIdx, currentTime,
   lineTime, nextLineTime, translation,
-  karaoke, showTranslation, onWord, onSeek,
+  karaoke, showTranslation, frozen, onWord, onSeek,
 }: Props) {
   const isCurrent = lineIdx === currentIdx
   const isPast = lineIdx < currentIdx
   const dist = Math.abs(lineIdx - currentIdx)
   const ref = useRef<HTMLDivElement>(null)
 
-  // Scroll current line into center of container
+  // Scroll current line into center of container (skip while user is browsing)
   useEffect(() => {
-    if (!isCurrent || !ref.current) return
+    if (!isCurrent || !ref.current || frozen) return
     const container = ref.current.closest('.lyrics-scroll') as HTMLElement | null
     if (!container) return
     const target = ref.current.offsetTop - container.clientHeight / 2 + ref.current.offsetHeight / 2
     container.scrollTo({ top: target, behavior: 'smooth' })
-  }, [isCurrent])
+  }, [isCurrent, frozen])
 
   const tokens = useMemo(() => tokenize(text), [text])
 
@@ -59,10 +60,10 @@ export function LyricLine({
 
   const wordCount = tokens.filter((t) => t.type === 'word').length
   let wIndex = 0
+  let prevLit = isPast ? 1 : 0
 
-  // Blur is 0 for current + 2 adjacent lines, then ramps up
-  const blur = isCurrent ? 0 : Math.max(0, Math.min(4, (dist - 2) * 1.6))
-  const opacity = isCurrent ? 1 : Math.max(0.18, 1 - dist * 0.12)
+  const blur = frozen ? 0 : (isCurrent ? 0 : Math.max(0, Math.min(4, (dist - 2) * 1.6)))
+  const opacity = frozen ? 1 : (isCurrent ? 1 : Math.max(0.18, 1 - dist * 0.12))
 
   return (
     <div
@@ -73,15 +74,18 @@ export function LyricLine({
     >
       <div className="lyric-en">
         {tokens.map((tok, i) => {
-          if (tok.type === 'sep') return <span key={i}>{tok.text}</span>
+          if (tok.type === 'sep') {
+            return <span key={i} className="lyric-sep" style={{ '--lit': prevLit } as React.CSSProperties}>{tok.text}</span>
+          }
           const myIdx = wIndex++
           const lit = isPast ? 1 : !isCurrent ? 0 : Math.max(0, Math.min(1, progress * wordCount - myIdx))
+          prevLit = lit
           return (
             <span
               key={i}
               className="word"
               style={{ '--lit': lit } as React.CSSProperties}
-              onClick={(e) => { e.stopPropagation(); onWord(tok.text, text) }}
+              onClick={(e) => { e.stopPropagation(); onWord(tok.text, text, lineTime) }}
             >
               {tok.text}
             </span>

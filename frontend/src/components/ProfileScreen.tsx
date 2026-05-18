@@ -1,15 +1,23 @@
+import { useMemo } from 'react'
 import { useNotebookStore } from '../store/notebookStore'
-import { useVocabNotebook } from '../hooks/useVocabNotebook'
 
 const WEEK_DATA = [22, 35, 18, 40, 28, 55, 32]
 const DAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
 const MAX_BAR = Math.max(...WEEK_DATA)
 
-export function ProfileScreen() {
+interface Props {
+  onOpenVocab: () => void
+}
+
+export function ProfileScreen({ onOpenVocab }: Props) {
   const { entries } = useNotebookStore()
-  const { deleteWord } = useVocabNotebook()
 
   const totalMin = WEEK_DATA.reduce((a, b) => a + b, 0)
+
+  const dueCount = useMemo(() => {
+    const now = Date.now()
+    return entries.filter((e) => !e.nextReview || e.nextReview <= now).length
+  }, [entries])
 
   return (
     <div className="screen">
@@ -66,7 +74,7 @@ export function ProfileScreen() {
               <div className="muted">生词本</div>
             </div>
             <div>
-              <div className="big">{Math.floor(entries.length * 1.4)}</div>
+              <div className="big">{entries.reduce((a, e) => a + (e.reviewCount ?? 0), 0)}</div>
               <div className="muted">复习次数</div>
             </div>
           </div>
@@ -96,28 +104,27 @@ export function ProfileScreen() {
           )}
         </div>
 
-        {/* Flashcards */}
-        <div className="card" style={{ gridArea: 'flash' }}>
-          <div className="card-eyebrow">生词本 ({entries.length})</div>
-          {entries.length === 0 ? (
-            <div className="flash-empty">还没有保存单词<br />点击歌词中的单词开始学习</div>
-          ) : (
-            <div className="flash-list">
-              {entries.map((e) => (
-                <div key={e.id} className="flash-item">
-                  <span className="flash-word">{e.word}</span>
-                  <span className="flash-cn">{e.explanation.cn}</span>
-                  <button
-                    onClick={() => e.id && deleteWord(e.id)}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-4)', fontSize: 12, flexShrink: 0 }}
-                  >
-                    ✕
-                  </button>
-                </div>
+        {/* Vocab notebook summary — links to the full Vocabulary page */}
+        <button className="card profile-vocab-card" style={{ gridArea: 'flash' }} onClick={onOpenVocab}>
+          <div className="card-eyebrow">生词本</div>
+          <div className="profile-vocab-main">
+            <div className="profile-vocab-num">{entries.length}</div>
+            <div className="profile-vocab-meta">
+              <div className="muted">已收藏单词</div>
+              {dueCount > 0 && <div className="profile-vocab-due">{dueCount} 个待复习</div>}
+            </div>
+          </div>
+          {entries.length > 0 && (
+            <div className="profile-vocab-chips">
+              {entries.slice(0, 6).map((e) => (
+                <span key={e.id} className="profile-vocab-chip">{e.word}</span>
               ))}
             </div>
           )}
-        </div>
+          <div className="profile-vocab-link">
+            {entries.length === 0 ? '去歌词里收藏单词' : '查看全部生词本 →'}
+          </div>
+        </button>
       </div>
     </div>
   )

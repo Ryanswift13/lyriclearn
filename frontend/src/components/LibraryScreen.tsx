@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import {
   searchSongs, searchAlbums, getAlbumSongs, getRecommendations,
-  getUserPlaylists, getPlaylistSongs,
+  getUserPlaylists, getPlaylistSongs, getSearchSuggestions,
   getSongUrl, getLyrics, formatDuration,
   type SearchResult, type AlbumResult, type PlaylistInfo,
 } from '../services/netease'
@@ -9,10 +9,14 @@ import { parseLRC } from '../lib/lrc-parser'
 import { usePlayerStore } from '../store/playerStore'
 import { useSettingsStore } from '../store/settingsStore'
 import { useLibrary } from '../hooks/useLibrary'
+import { useQueueStore } from '../store/queueStore'
 
 type LibTab = 'songs' | 'albums' | 'saved'
 
-interface Props { onSongPick: () => void }
+interface Props {
+  onSongPick: () => void
+  onPlayAll?: (songs: SearchResult[], startIndex?: number) => void
+}
 
 // ── Song card ────────────────────────────────────────────────
 function SongCard({ song, isPlaying, isLoading, inLibrary, onPlay, onToggleLib }: {
@@ -43,10 +47,9 @@ function SongCard({ song, isPlaying, isLoading, inLibrary, onPlay, onToggleLib }
 
 // ── Playlist card (square cover, not circular) ───────────────
 function PlaylistCard({ pl, isOpen, onClick }: { pl: PlaylistInfo; isOpen: boolean; onClick: () => void }) {
-  const [color, color2] = [pl.color, pl.color2]
   return (
     <button className={`lib-card playlist-card ${isOpen ? 'open' : ''}`} onClick={onClick}>
-      <div className="playlist-cover" style={{ background: `linear-gradient(135deg, ${color} 0%, ${color2} 100%)` }}>
+      <div className="playlist-cover" style={{ background: `linear-gradient(135deg, ${pl.color} 0%, ${pl.color2} 100%)` }}>
         {pl.coverUrl && <img src={pl.coverUrl} alt="" />}
         <div className="playlist-track-count">{pl.trackCount} 首</div>
       </div>
@@ -80,12 +83,13 @@ function SongRow({ song, idx, isLoading, inLibrary, onPlay, onToggleLib }: {
 }
 
 // ── Detail panel (shared by album & playlist) ────────────────
-function DetailPanel({ title, subtitle, songs, loadingId, isInLibrary, onPlay, onToggleLib, onClose }: {
+function DetailPanel({ title, subtitle, songs, loadingId, isInLibrary, onPlay, onToggleLib, onClose, onPlayAll }: {
   title: string; subtitle?: string; songs: SearchResult[]; loadingId: string | null
   isInLibrary: (id: string) => boolean
   onPlay: (s: SearchResult) => void
   onToggleLib: (e: React.MouseEvent, s: SearchResult) => void
   onClose: () => void
+  onPlayAll?: (songs: SearchResult[]) => void
 }) {
   return (
     <div className="album-detail">
@@ -94,11 +98,19 @@ function DetailPanel({ title, subtitle, songs, loadingId, isInLibrary, onPlay, o
           <div className="album-detail-title">{title}</div>
           {subtitle && <div className="album-detail-artist">{subtitle}</div>}
         </div>
-        <button className="album-detail-close" onClick={onClose}>
-          <svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2" fill="none" strokeLinecap="round">
-            <line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" />
-          </svg>
-        </button>
+        <div className="album-detail-actions">
+          {onPlayAll && songs.length > 0 && (
+            <button className="play-all-btn" onClick={() => onPlayAll(songs)}>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M5 3l14 9-14 9V3z" /></svg>
+              全部播放
+            </button>
+          )}
+          <button className="album-detail-close" onClick={onClose}>
+            <svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2" fill="none" strokeLinecap="round">
+              <line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" />
+            </svg>
+          </button>
+        </div>
       </div>
       <div className="album-song-list">
         {songs.map((s, i) => (
@@ -110,7 +122,7 @@ function DetailPanel({ title, subtitle, songs, loadingId, isInLibrary, onPlay, o
   )
 }
 
-export function LibraryScreen({ onSongPick }: Props) {
+export function LibraryScreen({ onSongPick, onPlayAll }: Props) {
   const [tab, setTab] = useState<LibTab>('songs')
   const [query, setQuery] = useState('')
   const [songResults, setSongResults] = useState<SearchResult[]>([])
@@ -134,7 +146,14 @@ export function LibraryScreen({ onSongPick }: Props) {
   // General
   const [loading, setLoading] = useState(false)
   const [loadingId, setLoadingId] = useState<string | null>(null)
+  const [searchFocused, setSearchFocused] = useState(false)
+  const [suggestions, setSuggestions] = useState<string[]>([])
+  const [searchHistory, setSearchHistory] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('verse:search-history') ?? '[]') }
+    catch { return [] }
+  })
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const suggTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const { song: currentSong, setSong, setAudioUrl, setLyrics } = usePlayerStore()
   const { neteaseCookie, neteaseUid, audioQuality } = useSettingsStore()
@@ -166,7 +185,34 @@ export function LibraryScreen({ onSongPick }: Props) {
     }).catch(() => {}).finally(() => setLikedLoading(false))
   }, [tab, likedPlaylist, likedLoaded, likedLoading])
 
-  useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current) }, [])
+  useEffect(() => () => {
+    if (timerRef.current) clearTimeout(timerRef.current)
+    if (suggTimerRef.current) clearTimeout(suggTimerRef.current)
+  }, [])
+
+  const saveToHistory = useCallback((term: string) => {
+    const t = term.trim()
+    if (!t) return
+    setSearchHistory(prev => {
+      const next = [t, ...prev.filter(h => h !== t)].slice(0, 10)
+      localStorage.setItem('verse:search-history', JSON.stringify(next))
+      return next
+    })
+  }, [])
+
+  const deleteFromHistory = useCallback((term: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setSearchHistory(prev => {
+      const next = prev.filter(h => h !== term)
+      localStorage.setItem('verse:search-history', JSON.stringify(next))
+      return next
+    })
+  }, [])
+
+  const clearHistory = useCallback(() => {
+    setSearchHistory([])
+    localStorage.removeItem('verse:search-history')
+  }, [])
 
   const doSearch = useCallback(async (kw: string) => {
     if (!kw.trim()) { setSongResults([]); setAlbumResults([]); return }
@@ -176,13 +222,40 @@ export function LibraryScreen({ onSongPick }: Props) {
       else if (tab === 'albums') setAlbumResults(await searchAlbums(kw))
     } catch { /* ignore */ }
     finally { setLoading(false) }
-  }, [tab])
+  }, [tab, saveToHistory])
+
+  const handleSelectSuggestion = useCallback((term: string) => {
+    setQuery(term)
+    setSearchFocused(false)
+    setSuggestions([])
+    saveToHistory(term)
+    doSearch(term)
+  }, [doSearch, saveToHistory])
+
+  const handleSearchKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && query.trim()) {
+      setSearchFocused(false)
+      saveToHistory(query.trim())
+      doSearch(query.trim())
+    } else if (e.key === 'Escape') {
+      setSearchFocused(false)
+    }
+  }, [query, doSearch, saveToHistory])
 
   const handleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value
     setQuery(val)
     if (timerRef.current) clearTimeout(timerRef.current)
     timerRef.current = setTimeout(() => doSearch(val), 400)
+    if (suggTimerRef.current) clearTimeout(suggTimerRef.current)
+    if (val.trim()) {
+      suggTimerRef.current = setTimeout(async () => {
+        const results = await getSearchSuggestions(val)
+        setSuggestions(results)
+      }, 300)
+    } else {
+      setSuggestions([])
+    }
   }
 
   const handleTabChange = (t: LibTab) => {
@@ -198,6 +271,7 @@ export function LibraryScreen({ onSongPick }: Props) {
       setSong({ id: s.id, name: s.name, artist: s.artist, album: s.album, coverUrl: s.coverUrl, duration: s.duration, color: s.color, color2: s.color2 })
       if (url) setAudioUrl(url)
       setLyrics(parseLRC(lyricsData.lrc), parseLRC(lyricsData.tlyric))
+      useQueueStore.getState().setQueue([s], 0)
       onSongPick()
     } catch (e) { console.error(e) }
     finally { setLoadingId(null) }
@@ -235,6 +309,43 @@ export function LibraryScreen({ onSongPick }: Props) {
     { id: 'saved', label: `收藏${libSongs.length ? ` (${libSongs.length})` : ''}` },
   ]
 
+  const historyMatches = query.trim()
+    ? searchHistory.filter(h => h.toLowerCase().includes(query.toLowerCase()))
+    : []
+  const filteredSuggestions = suggestions.filter(s => !historyMatches.includes(s))
+  const showDropdown = searchFocused && (
+    (!query.trim() && searchHistory.length > 0) ||
+    (!!query.trim() && (historyMatches.length > 0 || filteredSuggestions.length > 0))
+  )
+
+  const searchDropdown = showDropdown ? (
+    <div className="lib-search-dropdown" onMouseDown={(e) => e.preventDefault()}>
+      {!query.trim() && (
+        <div className="search-dropdown-header">
+          <span className="search-dropdown-label">最近搜索</span>
+          <button className="search-dropdown-clear" onClick={clearHistory}>清除全部</button>
+        </div>
+      )}
+      {(!query.trim() ? searchHistory : historyMatches).map(h => (
+        <div key={h} className="search-dropdown-item" onClick={() => handleSelectSuggestion(h)}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="search-dropdown-icon">
+            <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+          </svg>
+          <span className="search-dropdown-text">{h}</span>
+          <button className="search-dropdown-del" onClick={(e) => deleteFromHistory(h, e)}>✕</button>
+        </div>
+      ))}
+      {filteredSuggestions.map(s => (
+        <div key={s} className="search-dropdown-item" onClick={() => handleSelectSuggestion(s)}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="search-dropdown-icon">
+            <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <span className="search-dropdown-text">{s}</span>
+        </div>
+      ))}
+    </div>
+  ) : null
+
   return (
     <div className="screen">
       <div className="screen-head">
@@ -257,9 +368,14 @@ export function LibraryScreen({ onSongPick }: Props) {
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--ink-3)', flexShrink: 0 }}>
                 <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
               </svg>
-              <input type="text" value={query} onChange={handleInput} placeholder="搜索歌曲、歌手…" />
+              <input type="text" value={query} onChange={handleInput} placeholder="搜索歌曲、歌手…"
+                onFocus={() => setSearchFocused(true)}
+                onBlur={() => setTimeout(() => setSearchFocused(false), 150)}
+                onKeyDown={handleSearchKeyDown}
+              />
               {loading && <div className="spinner" />}
             </div>
+            {searchDropdown}
           </div>
           {!query.trim() && <div className="lib-section-label">{recsLoading ? '加载推荐中…' : '欧美热歌推荐'}</div>}
           {!query.trim() && recsLoading && <div style={{ display:'flex',justifyContent:'center',padding:'48px 0' }}><div className="spinner" /></div>}
@@ -308,7 +424,8 @@ export function LibraryScreen({ onSongPick }: Props) {
                   </div>
                   {openPlaylist && (
                     <DetailPanel title={openPlaylist.name} songs={openPlaylist.songs} loadingId={loadingId}
-                      isInLibrary={isInLibrary} onPlay={playSong} onToggleLib={toggleLib} onClose={() => setOpenPlaylist(null)} />
+                      isInLibrary={isInLibrary} onPlay={playSong} onToggleLib={toggleLib} onClose={() => setOpenPlaylist(null)}
+                      onPlayAll={onPlayAll ? (songs) => onPlayAll(songs) : undefined} />
                   )}
                 </>
               )}
@@ -326,9 +443,14 @@ export function LibraryScreen({ onSongPick }: Props) {
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--ink-3)', flexShrink: 0 }}>
                 <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
               </svg>
-              <input type="text" value={query} onChange={handleInput} placeholder="搜索专辑名称…" />
+              <input type="text" value={query} onChange={handleInput} placeholder="搜索专辑名称…"
+                onFocus={() => setSearchFocused(true)}
+                onBlur={() => setTimeout(() => setSearchFocused(false), 150)}
+                onKeyDown={handleSearchKeyDown}
+              />
               {loading && <div className="spinner" />}
             </div>
+            {searchDropdown}
           </div>
           {albumResults.length > 0 && (
             <div className="lib-grid">
@@ -360,7 +482,8 @@ export function LibraryScreen({ onSongPick }: Props) {
           {openAlbum && (
             <DetailPanel title={openAlbum.name} subtitle={openAlbum.artist} songs={openAlbum.songs}
               loadingId={loadingId} isInLibrary={isInLibrary} onPlay={playSong} onToggleLib={toggleLib}
-              onClose={() => setOpenAlbum(null)} />
+              onClose={() => setOpenAlbum(null)}
+              onPlayAll={onPlayAll ? (songs) => onPlayAll(songs) : undefined} />
           )}
         </>
       )}
@@ -371,9 +494,14 @@ export function LibraryScreen({ onSongPick }: Props) {
           {/* 网易云红心 */}
           {neteaseCookie && (
             <div className="lib-user-section">
-              <div className="lib-section-label">
-                <span style={{ color:'#ff5d8f' }}>♥</span> 网易云红心歌曲
-                {likedSongs.length > 0 && <span style={{ marginLeft:6,color:'var(--ink-4)' }}>({likedSongs.length})</span>}
+              <div className="lib-section-label" style={{ display:'flex',alignItems:'center',justifyContent:'space-between' }}>
+                <span><span style={{ color:'#ff5d8f' }}>♥</span> 网易云红心歌曲{likedSongs.length > 0 && <span style={{ marginLeft:6,color:'var(--ink-4)' }}>({likedSongs.length})</span>}</span>
+                {likedSongs.length > 0 && onPlayAll && (
+                  <button className="play-all-btn" onClick={() => onPlayAll(likedSongs)}>
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M5 3l14 9-14 9V3z" /></svg>
+                    全部播放
+                  </button>
+                )}
               </div>
               {likedLoading ? (
                 <div style={{ display:'flex',gap:10,alignItems:'center',marginBottom:20,color:'var(--ink-3)',fontSize:13 }}>

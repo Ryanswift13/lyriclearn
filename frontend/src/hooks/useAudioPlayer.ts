@@ -1,8 +1,10 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { usePlayerStore } from '../store/playerStore'
 
-export function useAudioPlayer() {
+export function useAudioPlayer(onSongEnd?: () => void) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
+  const onSongEndRef = useRef(onSongEnd)
+  useEffect(() => { onSongEndRef.current = onSongEnd })
   const { audioUrl, isPlaying, playbackRate, setIsPlaying, setCurrentTime, setDuration } =
     usePlayerStore()
 
@@ -10,7 +12,10 @@ export function useAudioPlayer() {
     const audio = new Audio()
     audioRef.current = audio
     const onDurationChange = () => setDuration(isNaN(audio.duration) ? 0 : audio.duration)
-    const onEnded = () => setIsPlaying(false)
+    const onEnded = () => {
+      setIsPlaying(false)
+      onSongEndRef.current?.()
+    }
     audio.addEventListener('durationchange', onDurationChange)
     audio.addEventListener('ended', onEnded)
     return () => {
@@ -24,7 +29,10 @@ export function useAudioPlayer() {
     if (!audioRef.current || !audioUrl) return
     audioRef.current.src = audioUrl
     audioRef.current.load()
-    setIsPlaying(true)
+    setCurrentTime(0)
+    audioRef.current.play()
+      .then(() => setIsPlaying(true))
+      .catch(() => setIsPlaying(false))
   }, [audioUrl])
 
   useEffect(() => {

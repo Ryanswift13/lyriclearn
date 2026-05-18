@@ -1,16 +1,26 @@
-import { useMemo } from 'react'
+import { useMemo, useState, useCallback, useRef, useEffect } from 'react'
 import { usePlayerStore } from '../store/playerStore'
 import { LyricLine } from './LyricLine'
 
 interface Props {
   karaoke: boolean
   showTranslation: boolean
-  onWord: (word: string, sentence: string) => void
+  onWord: (word: string, sentence: string, lineTime: number) => void
   onSeek: (time: number) => void
 }
 
 export function LyricsPanel({ karaoke, showTranslation, onWord, onSeek }: Props) {
   const { lyrics, translationLyrics, currentLineIndex, currentTime } = usePlayerStore()
+  const [frozen, setFrozen] = useState(false)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current) }, [])
+
+  const handleUserScroll = useCallback(() => {
+    setFrozen(true)
+    if (timerRef.current) clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(() => setFrozen(false), 5000)
+  }, [])
 
   const translationMap = useMemo(() => {
     if (!translationLyrics.length) return [] as string[]
@@ -34,7 +44,7 @@ export function LyricsPanel({ karaoke, showTranslation, onWord, onSeek }: Props)
   }
 
   return (
-    <div className="lyrics-scroll">
+    <div className="lyrics-scroll" onWheel={handleUserScroll} onTouchStart={handleUserScroll}>
       <div className="lyrics-spacer" />
       {lyrics.map((line, i) => (
         <LyricLine
@@ -48,6 +58,7 @@ export function LyricsPanel({ karaoke, showTranslation, onWord, onSeek }: Props)
           translation={translationMap[i]}
           karaoke={karaoke}
           showTranslation={showTranslation}
+          frozen={frozen}
           onWord={onWord}
           onSeek={onSeek}
         />
